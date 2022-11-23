@@ -820,7 +820,7 @@ impl Octocrab {
     }
 
     /// Requests a fresh installation auth token and caches it. Returns the token.
-    async fn request_installation_auth_token(&self) -> Result<SecretString> {
+    pub async fn request_installation_auth_token(&self) -> Result<SecretString> {
         let (app, installation, token) = if let AuthState::Installation {
             ref app,
             installation,
