@@ -886,10 +886,20 @@ impl Octocrab {
                 }
             };
 
+            let request_debug = format!("{:?}", request);
             let result = request.send().await;
+
             let status = match &result {
-                Ok(v) => Some(v.status()),
-                Err(e) => e.status(),
+                Ok(v) => {
+                    tracing::info!(status=v.status().as_u16(),url=v.url().as_str(), "Sent request {}, got response {:?}", request_debug, v);
+                    Some(v.status())
+                },
+                Err(e) => {
+                    let status = e.status().and_then(|s| Some(s.as_u16()));
+                    let url = e.url().and_then(|u| Some(u.as_str()));
+                    tracing::info!(status=status, url=url, "Sent request {}, got error {:?}", request_debug, e);
+                    e.status()
+                },
             };
             if let Some(StatusCode::UNAUTHORIZED) = status {
                 if let AuthState::Installation { ref token, .. } = self.auth_state {
