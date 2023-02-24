@@ -146,6 +146,8 @@
 #![cfg_attr(test, recursion_limit = "512")]
 
 const MAX_RETRIES: u32 = 3;
+const API_RETRY_DELAY_SECONDS: f64 = 0.1;
+const API_RETRY_SCALE_FACTOR: f64 = 2.0;
 
 mod api;
 mod error;
@@ -159,6 +161,7 @@ pub mod params;
 
 use std::fmt;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use once_cell::sync::Lazy;
 use reqwest::{header::HeaderName, StatusCode, Url};
@@ -957,6 +960,7 @@ impl Octocrab {
     /// Execute the given `request` using octocrab's Client.
     pub async fn execute(&self, mut request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
         let mut retries = 1;
+        let mut delay = API_RETRY_DELAY_SECONDS;
         loop {
             // Saved request that we can retry later if necessary
             let retry_request = request.try_clone().unwrap();
@@ -993,6 +997,13 @@ impl Octocrab {
                         if let AuthState::Installation { ref token, .. } = self.auth_state {
                             token.clear();
                         }
+                    }
+                    else {
+                        // Only delay if there wasn't an auth-related error, ie. 5xxs. We attempt to refresh tokens on
+                        // retries, which is more likely to fix auth errors than delays.
+                        tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+                        // Simple expoential backoff, no jitter.
+                        delay *= API_RETRY_SCALE_FACTOR;
                     }
                     if retries < MAX_RETRIES {
                         retries += 1;
