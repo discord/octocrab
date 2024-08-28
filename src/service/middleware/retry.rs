@@ -45,7 +45,7 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
             },
             RetryConfig::SimpleWithStatuses(count, statuses) => match result {
                 Ok(response) => {
-                    if response.status().is_server_error() || statuses.contains(*response.status()) {
+                    if response.status().is_server_error() || statuses.contains(&response.status().as_u16()) {
                         if *count > 0 {
                             Some(future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses)))
                         } else {
