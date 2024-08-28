@@ -60,6 +60,8 @@ impl RateLimitMetrics for NoOpRateLimitMetrics {
 pub enum RetryConfig {
     None,
     Simple(usize),
+    /// Retry .0 times if the status is a 5XX or if the status code is in the list of statuses
+    SimpleWithStatuses(usize, &'static [u16]),
     /// Handle GitHub's retry headers, up to [`self.0`] times.
     ///
     /// Per the rate limit documentation here: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28
@@ -103,6 +105,26 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                     if *count > 0 {
                         *count -= 1;
                         Some(future::ready(()).boxed())
+                    } else {
+                        None
+                    }
+                }
+            },
+            RetryConfig::SimpleWithStatuses(count, statuses) => match result {
+                Ok(response) => {
+                    if response.status().is_server_error() || statuses.contains(*response.status()) {
+                        if *count > 0 {
+                            Some(future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses)))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => {
+                    if *count > 0 {
+                        Some(future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses)))
                     } else {
                         None
                     }
