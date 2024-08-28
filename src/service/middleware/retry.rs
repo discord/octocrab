@@ -9,6 +9,8 @@ use crate::body::OctoBody;
 pub enum RetryConfig {
     None,
     Simple(usize),
+    /// Retry .0 times if the status is a 5XX or if the status code is in the list of statuses
+    SimpleWithStatuses(usize, &'static [u16]),
 }
 
 impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
@@ -36,6 +38,26 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                 Err(_) => {
                     if *count > 0 {
                         Some(future::ready(RetryConfig::Simple(count - 1)))
+                    } else {
+                        None
+                    }
+                }
+            },
+            RetryConfig::SimpleWithStatuses(count, statuses) => match result {
+                Ok(response) => {
+                    if response.status().is_server_error() || statuses.contains(*response.status()) {
+                        if *count > 0 {
+                            Some(future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses)))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => {
+                    if *count > 0 {
+                        Some(future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses)))
                     } else {
                         None
                     }
