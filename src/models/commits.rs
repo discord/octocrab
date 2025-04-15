@@ -61,9 +61,9 @@ pub struct CommitComparison {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitElement {
-    pub author: Option<GitUser>,
+    pub author: Option<CommitAuthor>,
     pub comment_count: i64,
-    pub committer: Option<GitUser>,
+    pub committer: Option<CommitAuthor>,
     pub message: String,
     pub tree: Tree,
     pub url: String,
@@ -113,13 +113,23 @@ pub struct CommitStats {
     pub total: Option<i64>,
 }
 
+/// The 'author' and 'committer' fields can either be
+/// a full set of Author details *or* sometimes, if done
+/// by a bot, etc, just have the git information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CommitAuthor {
+    Author(Author),
+    GitUser(GitUser),
+}
+
 /// Commit
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Commit {
-    pub author: Option<Author>,
+    pub author: Option<GitUser>,
     pub comments_url: String,
     pub commit: CommitElement,
-    pub committer: Option<Author>,
+    pub committer: Option<GitUser>,
     pub files: Option<Vec<repos::DiffEntry>>,
     pub html_url: String,
     pub node_id: String,
