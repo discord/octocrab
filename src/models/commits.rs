@@ -126,10 +126,10 @@ pub enum CommitAuthor {
 /// Commit
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Commit {
-    pub author: Option<GitUser>,
+    pub author: Option<CommitAuthor>,
     pub comments_url: String,
     pub commit: CommitElement,
-    pub committer: Option<GitUser>,
+    pub committer: Option<CommitAuthor>,
     pub files: Option<Vec<repos::DiffEntry>>,
     pub html_url: String,
     pub node_id: String,
