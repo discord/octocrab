@@ -134,7 +134,7 @@ pub enum CommitAuthor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Commit {
-    pub author: Option<GitUser>,
+    pub author: Option<CommitAuthor>,
     pub comments_url: Url,
     pub commit: CommitElement,
     pub committer: Option<ItemGitUser>,
