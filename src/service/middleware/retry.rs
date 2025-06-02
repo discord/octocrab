@@ -1,9 +1,18 @@
-use futures_util::future;
-use http::{Request, Response};
+use futures_util::{future, FutureExt};
+use http::header::AsHeaderName;
+use http::{HeaderMap, HeaderValue, Request, Response};
 use hyper_util::client::legacy::Error;
+use std::time::Duration;
 use tower::retry::Policy;
 
 use crate::body::OctoBody;
+
+fn header_as_u64(headers: &HeaderMap<HeaderValue>, header: impl AsHeaderName) -> Option<u64> {
+    headers.get(header)?.to_str().ok()?.parse().ok()
+}
+fn header_as_i64(headers: &HeaderMap<HeaderValue>, header: impl AsHeaderName) -> Option<i64> {
+    headers.get(header)?.to_str().ok()?.parse().ok()
+}
 
 #[derive(Clone)]
 pub enum RetryConfig {
@@ -11,10 +20,18 @@ pub enum RetryConfig {
     Simple(usize),
     /// Retry .0 times if the status is a 5XX or if the status code is in the list of statuses
     SimpleWithStatuses(usize, &'static [u16]),
+    /// Handle github's retry headers, up to .0 times.
+    /// Per the rate limit documentation here: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28
+    /// If we get a 429 and none of the headers are present, wait 60 seconds.
+    /// If we get a 403, and neither of those headers are present, do not retry.
+    /// It's not clear whether it's actually forbidden, or if it's a rate limit.
+    /// For server errors (5xx), retry immediately
+    /// For any other errors do not retry.
+    HandleRateLimits(usize),
 }
 
 impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
-    type Future = futures_util::future::Ready<Self>;
+    type Future = future::BoxFuture<'static, Self>;
 
     fn retry(
         &self,
@@ -27,7 +44,7 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                 Ok(response) => {
                     if response.status().is_server_error() || response.status() == 429 {
                         if *count > 0 {
-                            Some(future::ready(RetryConfig::Simple(count - 1)))
+                            Some(future::ready(RetryConfig::Simple(count - 1)).boxed())
                         } else {
                             None
                         }
@@ -37,7 +54,7 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                 }
                 Err(_) => {
                     if *count > 0 {
-                        Some(future::ready(RetryConfig::Simple(count - 1)))
+                        Some(future::ready(RetryConfig::Simple(count - 1)).boxed())
                     } else {
                         None
                     }
@@ -45,9 +62,14 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
             },
             RetryConfig::SimpleWithStatuses(count, statuses) => match result {
                 Ok(response) => {
-                    if response.status().is_server_error() || statuses.contains(&response.status().as_u16()) {
+                    if response.status().is_server_error()
+                        || statuses.contains(&response.status().as_u16())
+                    {
                         if *count > 0 {
-                            Some(future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses)))
+                            Some(
+                                future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses))
+                                    .boxed(),
+                            )
                         } else {
                             None
                         }
@@ -57,12 +79,58 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                 }
                 Err(_) => {
                     if *count > 0 {
-                        Some(future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses)))
+                        Some(
+                            future::ready(RetryConfig::SimpleWithStatuses(count - 1, statuses))
+                                .boxed(),
+                        )
                     } else {
                         None
                     }
                 }
             },
+            RetryConfig::HandleRateLimits(max_retries) => {
+                if *max_retries > 0 {
+                    let response = result.ok()?;
+                    let new_retries = *max_retries - 1;
+
+                    if response.status() == http::StatusCode::TOO_MANY_REQUESTS
+                        || response.status() == http::StatusCode::FORBIDDEN
+                    {
+                        let headers = response.headers();
+                        let wait_secs = match (
+                            header_as_u64(headers, "retry-after"),
+                            header_as_u64(headers, "x-ratelimit-remaining"),
+                            header_as_i64(headers, "x-ratelimit-reset"),
+                        ) {
+                            (Some(secs), _, _) => Some(secs),
+                            (None, Some(remaining), Some(reset_ts)) if remaining == 0 => {
+                                Some(std::cmp::max(5, reset_ts - chrono::Utc::now().timestamp())
+                                    as u64)
+                            }
+                            (None, _, _)
+                                if response.status() == http::StatusCode::TOO_MANY_REQUESTS =>
+                            {
+                                Some(60)
+                            }
+                            _ => None,
+                        }?;
+
+                        Some(
+                            tokio::time::sleep(Duration::from_secs(wait_secs))
+                                .then(move |_| {
+                                    future::ready(RetryConfig::HandleRateLimits(new_retries))
+                                })
+                                .boxed(),
+                        )
+                    } else if response.status().is_server_error() {
+                        Some(future::ready(RetryConfig::HandleRateLimits(new_retries)).boxed())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
         }
     }
 
