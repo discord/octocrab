@@ -18,9 +18,9 @@ fn header_as_i64(headers: &HeaderMap<HeaderValue>, header: impl AsHeaderName) ->
 pub enum RetryConfig {
     None,
     Simple(usize),
-    /// Retry .0 times if the status is a 5XX or if the status code is in the list of statuses
+    /// Retry [`self.0`] times if the status is a 5XX or if the status code is in the list of statuses
     SimpleWithStatuses(usize, &'static [u16]),
-    /// Handle github's retry headers, up to .0 times.
+    /// Handle github's retry headers, up to [`self.0`] times.
     /// Per the rate limit documentation here: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28
     /// If we get a 429 and none of the headers are present, wait 60 seconds.
     /// If we get a 403, and neither of those headers are present, do not retry.
@@ -93,9 +93,10 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                     let response = result.ok()?;
                     let new_retries = *max_retries - 1;
 
-                    if response.status() == http::StatusCode::TOO_MANY_REQUESTS
-                        || response.status() == http::StatusCode::FORBIDDEN
-                    {
+                    if matches!(
+                        response.status(),
+                        http::StatusCode::TOO_MANY_REQUESTS | http::StatusCode::FORBIDDEN
+                    ) {
                         let headers = response.headers();
                         let wait_secs = match (
                             header_as_u64(headers, "retry-after"),
