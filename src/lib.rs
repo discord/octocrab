@@ -185,7 +185,7 @@ mod api;
 mod body;
 mod error;
 mod from_response;
-mod page;
+pub mod page;
 
 pub mod auth;
 pub mod etag;
