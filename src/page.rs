@@ -238,14 +238,14 @@ impl<T: serde::de::DeserializeOwned> crate::FromResponse for Page<T> {
     }
 }
 
-struct HeaderLinks {
-    next: Option<Uri>,
-    prev: Option<Uri>,
-    first: Option<Uri>,
-    last: Option<Uri>,
+pub struct HeaderLinks {
+    pub next: Option<Uri>,
+    pub prev: Option<Uri>,
+    pub first: Option<Uri>,
+    pub last: Option<Uri>,
 }
 
-fn get_links(headers: &http::header::HeaderMap) -> crate::Result<HeaderLinks> {
+pub fn get_links(headers: &http::header::HeaderMap) -> crate::Result<HeaderLinks> {
     let mut first = None;
     let mut prev = None;
     let mut next = None;
