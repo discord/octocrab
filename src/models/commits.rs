@@ -142,8 +142,8 @@ pub struct Commit {
     pub node_id: String,
     pub parents: Vec<CommitParent>,
     /// Minimal Repository
-    pub repository: MinimalRepository,
-    pub score: f64,
+    pub repository: Option<MinimalRepository>,
+    pub score: Option<f64>,
     pub sha: String,
     pub text_matches: Option<Vec<SearchResultTextMatch>>,
     pub url: Url,
