@@ -1,6 +1,7 @@
+use std::sync::Arc;
 use futures_util::{future, FutureExt};
 use http::header::AsHeaderName;
-use http::{HeaderMap, HeaderValue, Request, Response};
+use http::{HeaderMap, HeaderValue, Request, Response, Uri};
 use hyper_util::client::legacy::Error;
 use std::time::Duration;
 use tower::retry::Policy;
@@ -12,6 +13,19 @@ fn header_as_u64(headers: &HeaderMap<HeaderValue>, header: impl AsHeaderName) ->
 }
 fn header_as_i64(headers: &HeaderMap<HeaderValue>, header: impl AsHeaderName) -> Option<i64> {
     headers.get(header)?.to_str().ok()?.parse().ok()
+}
+
+pub trait RateLimitMetrics: Send + Sync {
+    fn retry_error(&self, url: &Uri, status_code: http::StatusCode);
+    fn final_retry(&self, url: &Uri, status_code: http::StatusCode);
+    fn rate_limited(&self, url: &Uri, status_code: http::StatusCode, waiting_seconds: u64);
+}
+
+pub struct NullRateLimitMetrics;
+impl RateLimitMetrics for NullRateLimitMetrics {
+    fn retry_error(&self, _url: &Uri, _status_code: http::StatusCode) {}
+    fn final_retry(&self, _url: &Uri, _status_code: http::StatusCode) {}
+    fn rate_limited(&self, _url: &Uri, _status_code: http::StatusCode, _waiting_seconds: u64) {}
 }
 
 #[derive(Clone)]
@@ -27,7 +41,7 @@ pub enum RetryConfig {
     /// It's not clear whether it's actually forbidden, or if it's a rate limit.
     /// For server errors (5xx), retry immediately
     /// For any other errors do not retry.
-    HandleRateLimits(usize),
+    HandleRateLimits(Arc<dyn RateLimitMetrics>, usize),
 }
 
 impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
@@ -35,7 +49,7 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
 
     fn retry(
         &mut self,
-        _req: &mut Request<OctoBody>,
+        req: &mut Request<OctoBody>,
         result: &mut Result<Response<B>, Error>,
     ) -> Option<Self::Future> {
         match self {
@@ -86,7 +100,7 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                     }
                 }
             },
-            RetryConfig::HandleRateLimits(max_retries) => {
+            RetryConfig::HandleRateLimits(metrics, max_retries) => {
                 if *max_retries > 0 {
                     let response = result.as_ref().ok()?;
 
@@ -110,10 +124,17 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                             {
                                 Some(60)
                             }
-                            _ => None,
+                            _ => {
+                                metrics.retry_error(req.uri(), response.status());
+                                None
+                            }
                         }?;
 
                         *max_retries -= 1;
+                        metrics.rate_limited(req.uri(), response.status(), wait_secs);
+                        if *max_retries == 0 {
+                            metrics.final_retry(req.uri(), response.status());
+                        }
                         Some(
                             tokio::time::sleep(Duration::from_secs(wait_secs))
                                 .then(move |_| {
@@ -123,6 +144,10 @@ impl<B> Policy<Request<OctoBody>, Response<B>, Error> for RetryConfig {
                         )
                     } else if response.status().is_server_error() {
                         *max_retries -= 1;
+                        metrics.retry_error(req.uri(), response.status());
+                        if *max_retries == 0 {
+                            metrics.final_retry(req.uri(), response.status());
+                        }
                         Some(future::ready(()).boxed())
                     } else {
                         None
