@@ -31,6 +31,7 @@ features = [
     "retry",
     "rustls",
     "rustls-aws-lc-rs",
+    "rustls-ring",
     "rustls-webpki-tokio",
     "stream",
     "timeout",
@@ -115,12 +116,13 @@ default = [
     "timeout",
     "tracing",
     "default-client",
+    "rustls-aws-lc-rs",
     "jwt-rust-crypto",
 ]
 
 follow-redirect = ["tower-http/follow-redirect"]
 retry = ["tower/retry", "futures-util"]
-rustls = ["hyper-rustls", "hyper-rustls/native-tokio"]
+rustls = ["hyper-rustls"]
 rustls-ring = ["hyper-rustls/ring"]
 rustls-aws-lc-rs = ["hyper-rustls/aws-lc-rs"]
 jwt-aws-lc-rs = ["jsonwebtoken/aws_lc_rs"]
